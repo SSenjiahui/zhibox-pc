@@ -15,6 +15,13 @@ ZhiboXData/
 logs/
 *.log
 
+# 工具在工程内产生的本地状态（gh CLI 等）
+.local/
+
+# launcher 由源码编译，不入库（见 README）
+launcher/*.exe
+launcher/*.exe~
+
 # 本机杂项
 .DS_Store
 Thumbs.db

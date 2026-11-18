@@ -25,6 +25,8 @@ const env = { ...process.env,
   TEMP: TMP, TMP: TMP,
   ELECTRON_CACHE: path.join(CACHE, 'electron'),
   ELECTRON_BUILDER_CACHE: EB_CACHE,
+  /* 用公共镜像，国内网络下比 GitHub Release 稳。想直连就删掉这一行。 */
+  ELECTRON_MIRROR: process.env.ELECTRON_MIRROR || 'https://npmmirror.com/mirrors/electron/',
 };
 const run = (args) => execFileSync(EB, args, { cwd: ROOT, env, stdio: 'inherit', shell: true });
 
