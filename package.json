@@ -1,0 +1,73 @@
+{
+  "name": "zhibox-pc",
+  "productName": "智博X",
+  "version": "1.7.5",
+  "description": "智博X PC 客户端 · 自带播放内核与离线缓存",
+  "main": "src/main.js",
+  "author": {
+    "name": "zhibo-pc"
+  },
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win --x64"
+  },
+  "dependencies": {
+    "hls.js": "^1.6.15"
+  },
+  "devDependencies": {
+    "electron": "^31.7.7",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "cn.zhibox.pc",
+    "productName": "智博X",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "package.json",
+      "!node_modules/hls.js/{src,dist/*.mjs,dist/*.map,dist/*.js}",
+      "node_modules/hls.js/dist/hls.min.js"
+    ],
+    "asar": true,
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "signAndEditExecutable": false,
+      "sign": null,
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "智博X",
+      "deleteAppDataOnUninstall": false,
+      "language": "2052",
+      "artifactName": "智博X-${version}-安装版.${ext}"
+    },
+    "portable": {
+      "artifactName": "智博X-${version}-便携版.${ext}"
+    },
+    "extraMetadata": {
+      "productName": "ZhiboX"
+    }
+  }
+}

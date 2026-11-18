@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; worker-src 'self' blob:; child-src 'self' blob:; media-src 'self' data: blob: zbfile: http://127.0.0.1:*; connect-src 'self' blob: data: http://127.0.0.1:*; font-src 'self' data:;">
+<title>智博X</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ==================== 登录 ==================== -->
+<section id="loginView" class="login-view">
+  <div class="login-bg"></div>
+  <div class="login-card">
+    <div class="login-brand">
+      <div class="brand-mark">智</div>
+      <div>
+        <h1>智博X</h1>
+        <p>自带播放内核 · 支持离线缓存</p>
+      </div>
+    </div>
+
+    <div class="login-tabs">
+      <button id="tabCode" type="button" class="ltab active" data-mode="code">验证码登录</button>
+      <button id="tabPwd" type="button" class="ltab" data-mode="pwd">密码登录</button>
+    </div>
+
+    <!-- 验证码登录（默认）：不消耗密码错误次数，也不会撞「5 次错锁 15 分钟」 -->
+    <form id="codeForm" class="login-form">
+      <label class="field">
+        <span>手机号</span>
+        <input id="codePhone" type="tel" placeholder="请输入手机号" autocomplete="username" maxlength="15">
+      </label>
+      <label class="field">
+        <span>短信验证码</span>
+        <div class="field-row">
+          <input id="codeInput" type="text" inputmode="numeric" placeholder="6 位验证码" autocomplete="one-time-code" maxlength="8">
+          <button id="sendCodeBtn" type="button" class="btn-code">获取验证码</button>
+        </div>
+      </label>
+      <div id="codeError" class="login-error" hidden></div>
+      <button id="codeLoginBtn" type="submit" class="btn-primary">登 录</button>
+      <button id="guestBtn" type="button" class="btn-ghost">先逛逛（游客模式）</button>
+    </form>
+
+    <!-- 密码登录：后端 5 次错误就锁 15 分钟，所以只作备选 -->
+    <form id="loginForm" class="login-form" hidden>
+      <label class="field">
+        <span>手机号</span>
+        <input id="phoneInput" type="tel" placeholder="请输入手机号" autocomplete="username" maxlength="15">
+      </label>
+      <label class="field">
+        <span>密码</span>
+        <input id="pwdInput" type="password" placeholder="请输入密码" autocomplete="current-password">
+      </label>
+      <div id="loginError" class="login-error" hidden></div>
+      <button id="loginBtn" type="submit" class="btn-primary">登 录</button>
+      <button id="guestBtn2" type="button" class="btn-ghost">先逛逛（游客模式）</button>
+    </form>
+
+    <div class="login-foot">
+      <span id="loginKernel" class="kernel-pill">内核检测中…</span>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== 主界面 ==================== -->
+<section id="appView" class="app-view" hidden>
+
+  <!-- 侧边栏 -->
+  <aside class="sidebar">
+    <div class="side-brand">
+      <div class="brand-mark sm">智</div>
+      <div class="side-brand-txt">
+        <b>智博X</b>
+        <i id="sideVersion">v1.3.0</i>
+      </div>
+    </div>
+
+    <nav id="topNav" class="side-nav">
+      <button class="nav-item active" data-view="home"><span class="ni-ico">▤</span><span>首页</span></button>
+      <button class="nav-item" data-view="courses"><span class="ni-ico">▦</span><span>选课中心</span></button>
+      <button class="nav-item" data-view="mine"><span class="ni-ico">★</span><span>我的课程</span></button>
+      <div class="nav-sep">离线</div>
+      <button class="nav-item" data-view="library"><span class="ni-ico">⤓</span><span>离线库</span><b id="libDot" class="nav-badge" hidden></b></button>
+      <button class="nav-item" data-view="downloads"><span class="ni-ico">⇩</span><span>下载中心</span><b id="dlDot" class="nav-badge" hidden></b></button>
+      <div class="nav-sep">系统</div>
+      <button class="nav-item" data-view="settings"><span class="ni-ico">⚙</span><span>内核设置</span></button>
+      <button class="nav-item" data-view="logs"><span class="ni-ico">≡</span><span>运行日志</span></button>
+    </nav>
+
+    <div class="side-foot">
+      <div class="user-chip">
+        <img id="userAvatar" class="avatar" alt="">
+        <div class="uc-txt">
+          <b id="userName">未登录</b>
+          <i id="userSub">游客模式</i>
+        </div>
+      </div>
+      <div class="side-actions">
+        <button id="logoutBtn" class="btn-mini" hidden>退出</button>
+        <button id="reloginBtn" class="btn-mini" hidden>登录</button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- 内容区 -->
+  <main id="content" class="content">
+
+    <!-- ---------- 首页 ---------- -->
+    <section id="pane-home" class="pane">
+      <header class="pane-head">
+        <h2>首页</h2>
+        <div class="head-right"><span id="offlineTag" class="tag warn" hidden>离线缓存数据</span></div>
+      </header>
+
+      <div class="carousel">
+        <div id="carouselTrack" class="carousel-track"></div>
+        <div id="carouselDots" class="carousel-dots"></div>
+      </div>
+
+      <div class="section-head"><h3>推荐课程</h3></div>
+      <div id="homeCourses" class="course-grid"></div>
+
+      <div class="section-head"><h3>快捷入口</h3></div>
+      <div class="quick-panel">
+        <button class="quick" data-quick="study"><b>自习室</b><i>专注计时</i></button>
+        <button class="quick" data-quick="words"><b>猩子单词</b><i>背单词</i></button>
+        <button class="quick" data-quick="checkin"><b>猩子打卡</b><i>每日打卡</i></button>
+        <button class="quick" data-quick="shop"><b>猩子商城</b><i>课程周边</i></button>
+      </div>
+    </section>
+
+    <!-- ---------- 选课中心 ---------- -->
+    <section id="pane-courses" class="pane" hidden>
+      <header class="pane-head">
+        <h2>选课中心</h2>
+        <div class="head-right"><span id="courseCount" class="muted"></span></div>
+      </header>
+      <div id="filterBar" class="filter-bar"></div>
+      <div id="allCourses" class="course-grid"></div>
+      <div id="coursePager" class="pager"></div>
+    </section>
+
+    <!-- ---------- 我的课程 ---------- -->
+    <section id="pane-mine" class="pane" hidden>
+      <header class="pane-head">
+        <h2>我的课程</h2>
+        <div class="head-right"><span id="mineCount" class="muted"></span></div>
+      </header>
+      <div id="mineList" class="mine-list"></div>
+    </section>
+
+    <!-- ---------- 课程详情 ---------- -->
+    <section id="pane-detail" class="pane" hidden>
+      <header class="pane-head">
+        <button id="backBtn" class="btn-back">‹ 返回</button>
+        <div class="head-right"><span id="lessonCount" class="muted"></span></div>
+      </header>
+      <div id="detailHero" class="detail-hero"></div>
+      <div class="section-head">
+        <h3>课程目录</h3>
+        <div class="head-tools">
+          <button id="dlAllBtn" class="btn-mini">全部缓存</button>
+          <button id="dlResumeBtn" class="btn-mini">继续未完成</button>
+        </div>
+      </div>
+      <!-- 套课（线上集训营这类）的科目筛选条；单课自动隐藏 -->
+      <div id="lessonFilterBar" class="lesson-filter" hidden></div>
+      <div id="lessonList" class="lesson-list"></div>
+    </section>
+
+    <!-- ---------- 离线库 ---------- -->
+    <section id="pane-library" class="pane" hidden>
+      <header class="pane-head">
+        <h2>离线库</h2>
+        <div class="head-right">
+          <span id="libUsage" class="muted"></span>
+          <button id="libScanBtn" class="btn-mini">重新扫描</button>
+        </div>
+      </header>
+      <div class="hint-bar">
+        已封装成 MP4 的课时可以完全断网播放；只有 TS 分片的课时由内置内核即时封装后播放。
+      </div>
+      <div id="libList" class="lib-list"></div>
+    </section>
+
+    <!-- ---------- 下载中心 ---------- -->
+    <section id="pane-downloads" class="pane" hidden>
+      <header class="pane-head">
+        <h2>下载中心</h2>
+        <div class="head-right">
+          <span id="dlSummary" class="muted"></span>
+          <button id="dlCleanBtn" class="btn-mini">清理已完成</button>
+        </div>
+      </header>
+      <div id="dlList" class="dl-list"></div>
+    </section>
+
+    <!-- ---------- 内核设置 ---------- -->
+    <section id="pane-settings" class="pane" hidden>
+      <header class="pane-head">
+        <h2>内核设置</h2>
+        <div class="head-right">
+          <span id="setSaved" class="muted"></span>
+          <button id="setResetBtn" class="btn-mini">恢复默认</button>
+        </div>
+      </header>
+
+      <!-- 内核能力 -->
+      <div class="set-group">
+        <div class="set-group-head">
+          <h3>内核状态</h3>
+          <span class="muted" id="setKernelVer">—</span>
+        </div>
+        <div id="setKernelGrid" class="k-grid"></div>
+        <div class="set-actions">
+          <button id="setDataDirBtn" class="btn-mini">打开数据目录</button>
+          <button id="setLogDirBtn" class="btn-mini">打开日志目录</button>
+          <button id="setFileBtn" class="btn-mini">定位设置文件</button>
+        </div>
+      </div>
+
+      <!-- 离线 -->
+      <div class="set-group">
+        <div class="set-group-head"><h3>离线</h3></div>
+        <div class="set-row">
+          <div class="set-txt">
+            <b>强制离线模式</b>
+            <i>打开后拦截一切出网请求：只用离线库里的分片与 MP4，彻底断网也能用。</i>
+          </div>
+          <label class="switch"><input id="setOffline" type="checkbox"><span class="sw"></span></label>
+        </div>
+      </div>
+
+      <!-- 网络与下载 -->
+      <div class="set-group">
+        <div class="set-group-head"><h3>网络与下载</h3></div>
+        <div class="set-row">
+          <div class="set-txt">
+            <b>全局网络并发</b>
+            <i>同时进行的 HTTP 请求数（图片 / 接口 / 分片共用）。太高容易被限速。</i>
+          </div>
+          <div class="set-ctl"><input id="setNetConc" class="num" type="number" min="1" max="16" step="1"><span class="unit">1–16</span></div>
+        </div>
+        <div class="set-row">
+          <div class="set-txt">
+            <b>同时下载课时</b>
+            <i>一次并行缓存几节课。1 最稳，3 最快但更吃带宽。</i>
+          </div>
+          <div class="set-ctl"><input id="setQueueConc" class="num" type="number" min="1" max="3" step="1"><span class="unit">1–3</span></div>
+        </div>
+        <div class="set-row">
+          <div class="set-txt">
+            <b>单课时并行分片</b>
+            <i>同一节课内部同时拉几个分片。</i>
+          </div>
+          <div class="set-ctl"><input id="setSegConc" class="num" type="number" min="1" max="8" step="1"><span class="unit">1–8</span></div>
+        </div>
+        <div class="set-row">
+          <div class="set-txt">
+            <b>下完自动封装 MP4</b>
+            <i>分片下完立刻合成 full.mp4，之后可完全断网、可用系统播放器打开。</i>
+          </div>
+          <label class="switch"><input id="setAutoRemux" type="checkbox"><span class="sw"></span></label>
+        </div>
+        <div class="set-row">
+          <div class="set-txt">
+            <b>下载时阻止系统休眠</b>
+            <i>挂着缓存时不让电脑睡过去。</i>
+          </div>
+          <label class="switch"><input id="setKeepAwake" type="checkbox"><span class="sw"></span></label>
+        </div>
+      </div>
+
+      <!-- 存储 -->
+      <div class="set-group">
+        <div class="set-group-head">
+          <h3>存储</h3>
+          <span class="muted" id="setUsage">—</span>
+        </div>
+        <div class="set-row">
+          <div class="set-txt">
+            <b>离线库上限</b>
+            <i>超过上限时，最久没看过的课时自动归档进回收目录（可恢复），不会撑满磁盘。0 = 不限。</i>
+          </div>
+          <div class="set-ctl"><input id="setCacheLimit" class="num wide" type="number" min="0" step="256"><span class="unit">MB</span></div>
+        </div>
+        <div class="set-row">
+          <div class="set-txt">
+            <b>回收目录</b>
+            <i id="setTrashTxt">归档的课时会放在这里，7 天后自动清理。</i>
+          </div>
+          <div class="set-ctl">
+            <button id="setOpenTrashBtn" class="btn-mini">打开</button>
+            <button id="setEmptyTrashBtn" class="btn-mini danger">清空</button>
+          </div>
+        </div>
+        <div class="set-actions">
+          <button id="setEnforceBtn" class="btn-mini">立即按上限整理</button>
+          <span class="muted" id="setEnforceInfo"></span>
+        </div>
+      </div>
+
+      <!-- 播放 -->
+      <div class="set-group">
+        <div class="set-group-head"><h3>播放</h3></div>
+        <div class="set-row">
+          <div class="set-txt">
+            <b>默认倍速</b>
+            <i>打开课时时的初始倍速。</i>
+          </div>
+          <div class="set-ctl">
+            <select id="setRate" class="psel">
+              <option value="0.75">0.75x</option>
+              <option value="1">1.0x</option>
+              <option value="1.25">1.25x</option>
+              <option value="1.5">1.5x</option>
+              <option value="2">2.0x</option>
+            </select>
+          </div>
+        </div>
+        <div class="set-row">
+          <div class="set-txt">
+            <b>打开即播</b>
+            <i>解析完地址自动开始播放。</i>
+          </div>
+          <label class="switch"><input id="setAutoPlay" type="checkbox"><span class="sw"></span></label>
+        </div>
+        <div class="set-row">
+          <div class="set-txt">
+            <b>自动续播</b>
+            <i>从上次看到的位置继续（进度只存本地，不依赖服务器）。</i>
+          </div>
+          <label class="switch"><input id="setResume" type="checkbox"><span class="sw"></span></label>
+        </div>
+        <div class="set-row">
+          <div class="set-txt">
+            <b>记住音量</b>
+            <i>下次打开沿用这次的音量 / 静音状态。</i>
+          </div>
+          <div class="set-ctl"><input id="setVolume" class="num wide" type="number" min="0" max="100" step="5"><span class="unit">%</span></div>
+        </div>
+      </div>
+
+      <!-- 桌面 -->
+      <div class="set-group">
+        <div class="set-group-head"><h3>桌面</h3></div>
+        <div class="set-row">
+          <div class="set-txt">
+            <b>关闭窗口时最小化到托盘</b>
+            <i>关窗口不退出：内核继续跑，下载不断，点托盘图标回来。关掉这项，关窗口就真退出。</i>
+          </div>
+          <label class="switch"><input id="setTrayOnClose" type="checkbox"><span class="sw"></span></label>
+        </div>
+        <div class="set-row">
+          <div class="set-txt">
+            <b>完成时发系统通知</b>
+            <i>下载完成 / 封装完成 / 下载失败时弹系统通知。</i>
+          </div>
+          <label class="switch"><input id="setNotify" type="checkbox"><span class="sw"></span></label>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- 运行日志 ---------- -->
+    <section id="pane-logs" class="pane" hidden>
+      <header class="pane-head">
+        <h2>运行日志</h2>
+        <div class="head-right">
+          <select id="logDay" class="log-day"></select>
+          <button id="logOpenDirBtn" class="btn-mini">打开目录</button>
+          <button id="logCopyBtn" class="btn-mini">复制全部</button>
+        </div>
+      </header>
+      <div class="log-toolbar">
+        <label class="chk"><input id="logFollow" type="checkbox" checked> 自动跟随</label>
+        <label class="chk"><input id="logDebug" type="checkbox"> 显示 debug</label>
+        <input id="logFilter" class="log-filter" type="text" placeholder="过滤关键字…">
+        <span id="logStats" class="muted"></span>
+      </div>
+      <pre id="logBody" class="log-body"></pre>
+    </section>
+
+  </main>
+</section>
+
+<!-- ==================== 播放器 ==================== -->
+<div id="playerOverlay" class="player-overlay" hidden>
+  <div class="player-box">
+    <div class="player-head">
+      <div class="ph-left">
+        <span id="playerBadge" class="pbadge">在线</span>
+        <span id="playerTitle"></span>
+      </div>
+      <div class="ph-right">
+        <button id="playerDlBtn" class="btn-mini">缓存本课</button>
+        <button id="playerClose" class="btn-ico" title="关闭">✕</button>
+      </div>
+    </div>
+
+    <div id="playerStage" class="player-stage">
+      <video id="videoEl" playsinline></video>
+      <div id="playerCover" class="player-cover"><div class="spinner"></div><span id="playerCoverTxt">正在解析播放地址…</span></div>
+    </div>
+
+    <div class="player-bar">
+      <button id="btnPlay" class="btn-ico big" title="播放/暂停">▶</button>
+      <span id="tCur" class="ptime">00:00</span>
+      <div id="seek" class="seek"><div id="seekBuf" class="seek-buf"></div><div id="seekFill" class="seek-fill"></div><div id="seekKnob" class="seek-knob"></div></div>
+      <span id="tDur" class="ptime">00:00</span>
+      <select id="rateSel" class="psel" title="倍速">
+        <option value="0.75">0.75x</option>
+        <option value="1" selected>1.0x</option>
+        <option value="1.25">1.25x</option>
+        <option value="1.5">1.5x</option>
+        <option value="2">2.0x</option>
+      </select>
+      <select id="qSel" class="psel" title="清晰度"></select>
+      <button id="btnMute" class="btn-ico" title="静音">🔊</button>
+      <input id="volRange" class="pvrange" type="range" min="0" max="100" step="1" value="100" title="音量" />
+      <button id="btnFull" class="btn-ico" title="全屏">⛶</button>
+    </div>
+
+    <div id="playerFoot" class="player-foot"></div>
+  </div>
+</div>
+
+<div id="toast" class="toast" hidden></div>
+
+<!-- 自研 MSE 播放内核：零依赖，直接吃 fMP4 分片，不经过 hls.js -->
+<script src="kernel-player.js"></script>
+<!-- hls.js 仅在编码不被 MSE 支持时兜底 -->
+<script src="hls.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

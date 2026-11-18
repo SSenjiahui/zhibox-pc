@@ -1,0 +1,24 @@
+# 依赖
+node_modules/
+
+# 构建产物
+dist/
+release/
+build-out/
+build-out2/
+.cache/
+*.blockmap
+
+# 运行时数据（数据根可能是工程目录下的 data/ 或 ZhiboXData/）
+data/
+ZhiboXData/
+logs/
+*.log
+
+# 本机杂项
+.DS_Store
+Thumbs.db
+desktop.ini
+*.bak
+*.bak-*
+_*.js
