@@ -668,6 +668,42 @@ async function runSelfTest(outFile) {
     const usage = kernel.libraryUsage();
     push('library-usage', Object.assign({ ok: !!(usage && usage.bytes > 0) }, usage));
     const days = log.listDays();
+    if (authed && win && !win.isDestroyed()) {
+      try {
+        const lr = await win.webContents.executeJavaScript(`(async () => {
+          const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+          window.__zbUI.switchView('library');
+          await sleep(2000);
+          const boxes = [...document.querySelectorAll('#libList .lib-pick')];
+          const out = { picks: boxes.length };
+          if (boxes.length >= 2) {
+            boxes[0].click(); boxes[1].click();
+            await sleep(120);
+            out.selInfo = (document.getElementById('libSelInfo').textContent || '').trim();
+            out.delEnabled = !document.getElementById('libDelSel').disabled;
+            out.delText = (document.getElementById('libDelSel').textContent || '').trim();
+            out.pickedRows = document.querySelectorAll('#libList .lib-row.picked').length;
+            const all = document.getElementById('libSelectAll');
+            all.click();
+            await sleep(150);
+            out.afterSelectAll = (document.getElementById('libSelInfo').textContent || '').trim();
+            all.click();
+            await sleep(150);
+            out.afterUnselectAll = (document.getElementById('libSelInfo').textContent || '').trim();
+            await sleep(100);
+            out.delDisabledAfter = document.getElementById('libDelSel').disabled;
+          }
+          return out;
+        })()`);
+        push('lib-multiselect', {
+          ok: !!(lr && lr.picks > 0 && lr.pickedRows === 2 && lr.delEnabled &&
+                 /已选 2/.test(lr.selInfo || '') && /全|共/.test(lr.afterSelectAll || '') &&
+                 lr.delDisabledAfter === true),
+          ...(lr || {}),
+        });
+      } catch (e) { push('lib-multiselect', { ok: false, error: String((e && e.message) || e) }); }
+    }
+
     push('log-days', { ok: days.length > 0, days: days.length });
     const tail = log.tail(0, 12);
     /* 常驻日志是本项目的硬承诺之一：必须有内容，且最后一行是真实写过的记录 */
@@ -902,6 +938,138 @@ async function runSelfTest(outFile) {
       } catch (e) {
         push('subtitle-ui', { ok: false, error: String((e && e.message) || e) });
       }
+    }
+
+    /* ---- 搜索 + 续播 + 离线库多选 ---- */
+    if (authed && win && !win.isDestroyed()) {
+      try {
+        const sr = await win.webContents.executeJavaScript(`(async () => {
+          const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+          const out = {};
+          window.__zbUI.switchView('courses');
+          await sleep(300);
+          const si = document.getElementById('courseSearch');
+          si.value = '高数';
+          si.dispatchEvent(new Event('input', { bubbles: true }));
+          await sleep(2600);
+          out.course = {
+            inputShown: !!si.offsetParent,
+            cards: document.querySelectorAll('#allCourses .course-card').length,
+            countText: (document.getElementById('courseCount').textContent || '').trim(),
+            kw: (window.__zbUI.state && 'ok') || '',
+            bodyLen: document.getElementById('allCourses').textContent.length,
+            firstTag: (document.getElementById('allCourses').firstElementChild || {}).className || '',
+          };
+          /* 清掉搜索，恢复分页 */
+          si.value = '';
+          si.dispatchEvent(new Event('input', { bubbles: true }));
+          await sleep(1200);
+          out.courseRestored = document.querySelectorAll('#allCourses .course-card').length;
+
+          window.__zbUI.switchView('mine');
+          await sleep(400);
+          const mi = document.getElementById('mineSearch');
+          mi.value = '集训营';
+          mi.dispatchEvent(new Event('input', { bubbles: true }));
+          await sleep(700);
+          out.mine = {
+            inputShown: !!mi.offsetParent,
+            rows: document.querySelectorAll('#mineList .mine-row').length,
+            countText: (document.getElementById('mineCount').textContent || '').trim(),
+          };
+          mi.value = '';
+          mi.dispatchEvent(new Event('input', { bubbles: true }));
+          await sleep(600);
+          out.mineRestored = document.querySelectorAll('#mineList .mine-row').length;
+          return out;
+        })()`);
+        push('search-course', {
+          ok: !!(sr && sr.course && sr.course.inputShown && sr.course.cards > 0 &&
+                 sr.courseRestored > 0 && sr.mine && sr.mine.inputShown && sr.mineRestored > 0),
+          ...(sr || {}),
+        });
+      } catch (e) { push('search-course', { ok: false, error: String((e && e.message) || e) }); }
+    }
+
+    if (authed && win && !win.isDestroyed()) {
+      try {
+        const rr = await win.webContents.executeJavaScript(`(async () => {
+          const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+          /* 先在这门课里造一条「看到一半」的进度，续播条才有东西可显示。
+           * 直接写内核，不依赖机器上有没有历史进度。 */
+          try {
+            /* extra 会覆盖计算出来的 finished —— 这条课时在前面被播过、已被标成「已看完」，
+             * 续播条只挑「没看完的」，所以这里显式置回 false。 */
+            await window.zhibo.progress.save('1992', '92957', 640.5, 3323.04, { finished: false });
+          } catch (e) {}
+          window.__zbUI.switchView('mine');
+          await sleep(300);
+          await window.__zbUI.openCourse({ id: '1992', name: '线上集训营（含高数Ⅰ）' });
+          await sleep(2200);
+          const rb = document.getElementById('resumeBar');
+          const out = { resumeShown: !!(rb && !rb.hidden), resumeTxt: (rb && rb.textContent || '').trim().slice(0, 80) };
+          /* 课时搜索 */
+          const ls = document.getElementById('lessonSearch');
+          if (ls) {
+            ls.value = '错题';
+            ls.dispatchEvent(new Event('input', { bubbles: true }));
+            await sleep(1200);
+            const rows = [...document.querySelectorAll('#lessonList .lesson-row[data-key]')];
+            out.lesson = {
+              inputShown: !!ls.offsetParent,
+              visible: rows.filter(r => !r.hidden).length,
+              total: rows.length,
+            };
+            ls.value = '';
+            ls.dispatchEvent(new Event('input', { bubbles: true }));
+            await sleep(1200);
+            const rows2 = [...document.querySelectorAll('#lessonList .lesson-row[data-key]')];
+            out.lessonRestored = rows2.filter(r => !r.hidden).length;
+          } else out.lesson = { inputShown: false };
+          return out;
+        })()`);
+        push('search-lesson', {
+          ok: !!(rr && rr.resumeShown && rr.lesson && rr.lesson.inputShown && rr.lesson.visible > 0 &&
+                 rr.lesson.visible < rr.lesson.total && rr.lessonRestored > rr.lesson.visible),
+          ...(rr || {}),
+        });
+
+        /* 详情页滚动位置记忆 */
+        try {
+          const sc = await win.webContents.executeJavaScript(`(async () => {
+            const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+            const c = document.getElementById('content');
+            /* smooth 滚动下赋 scrollTop 是动画，必须用 instant 才能立刻取值 */
+            c.scrollTo({ top: 900, behavior: 'instant' });
+            await sleep(250);
+            const before = c.scrollTop;
+            window.__zbUI.switchView('courses');
+            await sleep(500);
+            window.__zbUI.switchView('detail');
+            await sleep(900);
+            const after = document.getElementById('content').scrollTop;
+            return { before, after, kept: Math.abs(after - before) < 60 };
+          })()`);
+          push('scroll-memory', { ok: !!(sc && sc.kept && sc.before > 200), ...(sc || {}) });
+        } catch (e) { push('scroll-memory', { ok: false, error: String((e && e.message) || e) }); }
+
+        /* 截图证据：关掉播放器，停在课程详情页（续播条 + 课时搜索框） */
+        if (process.env.ZB_SHOT2 && win && !win.isDestroyed()) {
+          try {
+            await win.webContents.executeJavaScript(`(async () => {
+              const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+              try { window.__zbUI.closePlayer && window.__zbUI.closePlayer(); } catch (e) {}
+              await sleep(700);
+              window.__zbUI.switchView('detail');
+              await sleep(900);
+            })()`);
+            const img = await win.webContents.capturePage();
+            const f = process.env.ZB_SHOT2.replace(/\.png$/i, '-detail.png');
+            fs.writeFileSync(f, img.toPNG());
+            push('shot-detail', { ok: true, file: f, bytes: img.toPNG().length });
+          } catch (e) { push('shot-detail', { ok: false, error: String((e && e.message) || e) }); }
+        }
+      } catch (e) { push('search-lesson', { ok: false, error: String((e && e.message) || e) }); }
     }
 
     push('course-groups', {

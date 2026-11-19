@@ -236,17 +236,21 @@ class Kernel extends EventEmitter {
 
   allProgress() { return store.get(PROGRESS_KEY, {}); }
 
-  /** 某课程的整体进度（用于「我的课程」角标） */
+  /** 某课程的整体进度（用于「我的课程」角标）。
+   *  同时也把每节课的明细一起带回去（byLesson），渲染层要画进度百分比和「上次看到哪里」，
+   *  只有聚合计数是画不出来的。 */
   courseProgress(courseId, lessonIds) {
     const all = store.get(PROGRESS_KEY, {});
+    const byLesson = {};
     let watched = 0, finished = 0;
     (lessonIds || []).forEach((id) => {
-      const p = all[courseId + ':' + id];
+      const p = all[courseId + ':' + String(id)];
       if (!p) return;
+      byLesson[String(id)] = { pos: p.pos || 0, duration: p.duration || 0, percent: p.percent || 0, finished: !!p.finished };
       if (p.finished) { finished++; watched++; }
       else if (p.pos > 5) watched++;
     });
-    return { watched, finished, total: (lessonIds || []).length };
+    return { watched, finished, total: (lessonIds || []).length, byLesson };
   }
 
   /* ---------------- 离线库 ---------------- */

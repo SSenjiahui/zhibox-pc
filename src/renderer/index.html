@@ -138,6 +138,10 @@
         <h2>选课中心</h2>
         <div class="head-right"><span id="courseCount" class="muted"></span></div>
       </header>
+      <div class="search-row">
+        <input id="courseSearch" class="search-input" type="search" placeholder="搜索课程名 / 老师…" autocomplete="off" />
+        <button id="courseSearchClear" class="btn-mini" hidden>清除</button>
+      </div>
       <div id="filterBar" class="filter-bar"></div>
       <div id="allCourses" class="course-grid"></div>
       <div id="coursePager" class="pager"></div>
@@ -149,6 +153,9 @@
         <h2>我的课程</h2>
         <div class="head-right"><span id="mineCount" class="muted"></span></div>
       </header>
+      <div class="search-row">
+        <input id="mineSearch" class="search-input" type="search" placeholder="在我的课程里搜索…" autocomplete="off" />
+      </div>
       <div id="mineList" class="mine-list"></div>
     </section>
 
@@ -166,6 +173,11 @@
           <button id="dlResumeBtn" class="btn-mini">继续未完成</button>
         </div>
       </div>
+      <!-- 上次看到哪里：进课就看得到，一键续播 -->
+      <div id="resumeBar" class="resume-bar" hidden></div>
+      <div class="search-row">
+        <input id="lessonSearch" class="search-input" type="search" placeholder="搜索课时名 / 序号…" autocomplete="off" />
+      </div>
       <!-- 套课（线上集训营这类）的科目筛选条；单课自动隐藏 -->
       <div id="lessonFilterBar" class="lesson-filter" hidden></div>
       <div id="lessonList" class="lesson-list"></div>
@@ -182,6 +194,11 @@
       </header>
       <div class="hint-bar">
         已封装成 MP4 的课时可以完全断网播放；只有 TS 分片的课时由内置内核即时封装后播放。
+      </div>
+      <div id="libTools" class="lib-tools">
+        <label class="lib-check-all"><input type="checkbox" id="libSelectAll" /> 全选</label>
+        <span id="libSelInfo" class="muted">未选择</span>
+        <button id="libDelSel" class="btn-mini danger" disabled>删除选中</button>
       </div>
       <div id="libList" class="lib-list"></div>
     </section>

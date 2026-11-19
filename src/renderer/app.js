@@ -61,7 +61,18 @@ const state = {
   groupCollapsed: {},
   groupFilterFor: '',
   groupCollapsedFor: '',
+  /* 搜索词（三个面板各存一份，切走再回来还在） */
+  kwCourse: '',
+  kwMine: '',
+  kwLesson: '',
+  /* 离线库多选：'courseId:lessonId' 的集合 */
+  libSel: new Set(),
+  /* 每门课的详情页滚动位置：courseId -> scrollTop（回来接着看） */
+  detailScroll: new Map(),
 };
+
+/* 课时匹配串：key → 小写「序号 名称」（renderDetail 里写，applyLessonKw 里读） */
+const ROWKW = new Map();
 
 /* ================= 通用 ================= */
 let toastTimer = null;
@@ -458,6 +469,26 @@ async function loadAllCourses(page) {
   state.allPage = page || 1;
   box.innerHTML = '';
   for (let i = 0; i < 6; i++) box.appendChild(el('div', 'sk-card skeleton'));
+  const kw = String(state.kwCourse || '').trim();
+
+  if (kw) {
+    /* 搜索模式：拉全量后本地过滤，不分页 */
+    let all = [];
+    try { all = await fetchAllForCategory(state.filterCategory); } catch (e) { all = []; }
+    all.forEach((c) => { if (c.categoryId && c.categoryName) state.categories.set(String(c.categoryId), c.categoryName); });
+    state.allCourses = all.filter((c) => hitKw(c, kw));
+    renderFilters();
+    box.innerHTML = '';
+    $('courseCount').textContent = '搜索「' + kw + '」· ' + state.allCourses.length + ' 门';
+    $('coursePager').innerHTML = '';
+    if (!state.allCourses.length) {
+      box.appendChild(el('div', 'empty-hit', '没有匹配「' + kw + '」的课程'));
+      return;
+    }
+    state.allCourses.forEach((c) => box.appendChild(courseCard(c)));
+    return;
+  }
+
   try {
     const r = await unwrap(window.zhibo.course.page(state.allPage, state.allPageSize, state.filterCategory));
     state.allCourses = (r && r.data) || [];
@@ -494,6 +525,36 @@ function renderPager() {
   p.appendChild(next);
 }
 
+/* ---------- 课程搜索 ---------- */
+/* 选课中心服务端按页给（pageSize 固定生效 20 条），没法做服务端搜索。
+ * 所以「有搜索词」时先按分类把前几页全拉下来缓存，再本地过滤。
+ * 无搜索词时仍走分页，保持原有翻页体验。 */
+
+let _allCache = null;   // { at, cat, list }
+
+async function fetchAllForCategory(cat) {
+  const now = Date.now();
+  if (_allCache && _allCache.cat === String(cat) && now - _allCache.at < 120000) return _allCache.list;
+  const out = [];
+  for (let p = 1; p <= 6; p++) {
+    let page = [];
+    try { const r = await unwrap(window.zhibo.course.page(p, 20, cat)); page = (r && r.data) || []; }
+    catch (e) { break; }
+    out.push(...page);
+    if (page.length < 20) break;
+  }
+  _allCache = { at: now, cat: String(cat), list: out };
+  return out;
+}
+
+function hitKw(obj, kw) {
+  if (!kw) return true;
+  const k = String(kw).toLowerCase();
+  const fields = [obj.name, obj.introduction, obj.categoryName, obj.courseTagName, obj.shareTitle];
+  (obj.teacherList || []).forEach((t) => fields.push(t && (t.name || t.teacherName)));
+  return fields.some((f) => f && String(f).toLowerCase().includes(k));
+}
+
 /* ================= 我的课程 ================= */
 async function loadMineCourses() {
   const box = $('mineList');
@@ -511,9 +572,14 @@ async function loadMineCourses() {
   } catch (e) { state.mineCourses = []; }
 
   box.innerHTML = '';
-  $('mineCount').textContent = state.mineCourses.length ? '共 ' + state.mineCourses.length + ' 门' : '';
+  const kw = String(state.kwMine || '').trim();
+  const shown = kw ? state.mineCourses.filter((c) => hitKw(c, kw)) : state.mineCourses;
+  $('mineCount').textContent = kw
+    ? '匹配 ' + shown.length + ' / ' + state.mineCourses.length + ' 门'
+    : (state.mineCourses.length ? '共 ' + state.mineCourses.length + ' 门' : '');
   if (!state.mineCourses.length) { box.appendChild(el('div', 'muted', '还没有已购课程')); return; }
-  state.mineCourses.forEach((c) => box.appendChild(mineRow(c)));
+  if (!shown.length) { box.appendChild(el('div', 'empty-hit', '没有匹配「' + kw + '」的课程')); return; }
+  shown.forEach((c) => box.appendChild(mineRow(c)));
 }
 
 function mineRow(c) {
@@ -546,7 +612,8 @@ function mineRow(c) {
 }
 
 /* ================= 课程详情 ================= */
-async function openCourse(c) {
+async function openCourse(c, opts) {
+  const o = opts || {};
   if (c == null || typeof c !== 'object') {
     const id = String(c);
     c = state.allCourses.find((x) => String(x.id) === id) ||
@@ -648,14 +715,55 @@ async function renderDetail(d) {
   const progOf = async (cid) => {
     try {
       const pg = await window.zhibo.progress.course(String(cid), allIds);
-      const m = new Map(Object.entries(pg || {}));
-      m.forEach((v, k) => state.lessonProgress.set(k, v));
+      /* 主进程返回 { watched, finished, total, byLesson:{lessonId:{pos,percent,...}} } */
+      const by = (pg && pg.byLesson) || {};
+      Object.entries(by).forEach(([k, v]) => state.lessonProgress.set(String(k), v));
     } catch (e) {}
   };
   state.lessonProgress = new Map();
   for (const g of groups) await progOf(g.id);
 
   const multi = groups.length > 1;
+
+  /* 上次看到哪里：找这门课里进度最新的一条，做成「继续学习」条 */
+  (function renderResume() {
+    const rb = $('resumeBar');
+    if (!rb) return;
+    rb.innerHTML = '';
+    let best = null, bestLesson = null, bestGroup = null;
+    groups.forEach((g) => {
+      g.lessons.forEach((L) => {
+        const lp = state.lessonProgress.get(String(L.id));
+        if (!lp || !(lp.pos > 5) || lp.finished) return;
+        if (!best || (lp.pos / (lp.duration || 1)) > (best.pos / (best.duration || 1))) {
+          best = lp; bestLesson = L; bestGroup = g;
+        }
+      });
+    });
+    if (!best || !bestLesson) { rb.hidden = true; return; }
+    const pct = Math.max(0, Math.min(100, Math.round((best.percent || 0) * 100)));
+    const txt = el('div', 'rb-txt');
+    const nm = el('div');
+    nm.appendChild(document.createTextNode('上次看到：'));
+    nm.appendChild(el('b', '', bestLesson.name || '第 ' + bestLesson.id + ' 节'));
+    txt.appendChild(nm);
+    txt.appendChild(el('span', 'rb-sub', pct + '% · 已看 ' + fmtTime(best.pos) + ' / ' + fmtTime(best.duration)));
+    rb.appendChild(txt);
+    const bar = el('div', 'rb-bar');
+    const bi = document.createElement('i');
+    bi.style.width = pct + '%';
+    bar.appendChild(bi);
+    rb.appendChild(bar);
+    const go = el('button', 'rb-go', '继续学习');
+    go.addEventListener('click', () => {
+      const gc = multi
+        ? Object.assign({}, d, { id: String(bestGroup.id), name: (d.name ? d.name + ' · ' : '') + (bestGroup.name || '') })
+        : d;
+      playLesson(bestLesson, gc);
+    });
+    rb.appendChild(go);
+    rb.hidden = false;
+  })();
 
   /* 换一门课就把筛选/折叠重置，别把上一门课的状态带过来 */
   const scope = String(d.id) + '|' + groups.map((g) => g.id).join(',');
@@ -755,10 +863,14 @@ async function renderDetail(d) {
 
    g.lessons.forEach((L, i) => {
     const key = String(gc.id) + ':' + String(L.id);
+    /* 课时搜索用的匹配串：序号 + 名称（大小写归一，便于中文/数字混搜） */
+    ROWKW.set(key, ((i + 1) + ' ' + (L.name || '')).toLowerCase());
     const lp = state.lessonProgress.get(String(L.id)) || null;
     const lm = state.libMap.get(key) || null;
 
     const row = el('div', 'lesson-row');
+    row.dataset.key = key;
+    row.dataset.kw = ROWKW.get(key) || '';
     row.appendChild(el('div', 'lr-idx', String(i + 1)));
     const nameWrap = el('div', 'lr-name');
     nameWrap.appendChild(document.createTextNode(L.name || '第 ' + (i + 1) + ' 节'));
@@ -799,6 +911,60 @@ async function renderDetail(d) {
   });
 
   applyFilter();
+  applyLessonKw();
+
+  /* 回到这门课时接着上次的位置（几百课的目录重新滚很烦） */
+  restoreDetailScroll(d);
+
+  /* 课时搜索：按行过滤，并让所属分组自动展开/收起 */
+  function applyLessonKw() {
+    const kw = String(state.kwLesson || '').trim().toLowerCase();
+    const rows = list.querySelectorAll('.lesson-row[data-key]');
+    rows.forEach((r) => {
+      if (!kw) { r.hidden = false; return; }
+      const hay = r.dataset.kw || '';
+      r.hidden = !hay.includes(kw);
+    });
+    /* 分组：组内全被过滤掉就连组带壳一起藏掉 */
+    secs.forEach((it) => {
+      const body = it.sec.querySelector('.lesson-group-body') || it.sec;
+      const all = body.querySelectorAll('.lesson-row[data-key]');
+      const vis = [...all].filter((r) => !r.hidden).length;
+      if (kw) {
+        it.sec.dataset.kwHidden = vis === 0 ? '1' : '';
+        if (vis === 0) it.sec.hidden = true;
+        else { it.sec.hidden = false; it.sec.classList.remove('collapsed'); }
+      } else {
+        it.sec.dataset.kwHidden = '';
+      }
+    });
+    if (!kw) applyFilter();
+  }
+}
+
+/* 详情页滚动位置：main 是真正滚动的容器，不是 window */
+function scrollerEl() {
+  return document.getElementById('content') || document.scrollingElement;
+}
+function restoreDetailScroll(d) {
+  if (!d) return;
+  const key = String(d.id);
+  const pos = state.detailScroll.get(key);
+  requestAnimationFrame(() => {
+    const el2 = scrollerEl();
+    if (!el2) return;
+    /* .content 带 scroll-behavior:smooth，直接赋 scrollTop 会变成一段动画，
+     * 立刻读回值仍是 0。恢复位置必须用 instant，用户也感觉不到"自己在滚"。 */
+    try { el2.scrollTo({ top: pos || 0, behavior: 'instant' }); }
+    catch (e) { el2.scrollTop = pos || 0; }
+  });
+}
+function rememberDetailScroll() {
+  const cc = state.currentCourse;
+  if (!cc) return;
+  const el2 = scrollerEl();
+  if (!el2) return;
+  state.detailScroll.set(String(cc.id), el2.scrollTop || 0);
 }
 
 /* ================= 离线库 ================= */
@@ -845,12 +1011,37 @@ async function renderLibrary() {
     $('libUsage').textContent = u ? (u.lessons || 0) + ' 课时 · ' + fmtSize(u.bytes || 0) : '';
   } catch (e) { $('libUsage').textContent = ''; }
 
+  /* 选择集合跟着真实数据收敛：已删掉的条目要从 set 里剔掉 */
+  const alive = new Set(arr.map((m) => String(m.courseId) + ':' + String(m.lessonId)));
+  [...state.libSel].forEach((k) => { if (!alive.has(k)) state.libSel.delete(k); });
+
+  const tools = $('libTools');
+  if (tools) tools.hidden = !arr.length;
+
   if (!arr.length) {
     box.appendChild(el('div', 'muted', '离线库还是空的。在课程目录里点「缓存」，或点右上角「全部缓存」。'));
+    paintLibSel();
     return;
   }
+
   arr.forEach((m) => {
+    const key = String(m.courseId) + ':' + String(m.lessonId);
     const row = el('div', 'lib-row');
+    if (state.libSel.has(key)) row.classList.add('picked');
+
+    /* 多选勾选框：点它只选，不触发播放 */
+    const pick = document.createElement('input');
+    pick.type = 'checkbox';
+    pick.className = 'lib-pick';
+    pick.checked = state.libSel.has(key);
+    pick.addEventListener('click', (e) => e.stopPropagation());
+    pick.addEventListener('change', () => {
+      if (pick.checked) state.libSel.add(key); else state.libSel.delete(key);
+      row.classList.toggle('picked', pick.checked);
+      paintLibSel();
+    });
+    row.appendChild(pick);
+
     const left = el('div', 'lib-left');
     left.appendChild(el('div', 'lib-name', m.lessonName || ('第 ' + m.lessonId + ' 节')));
     left.appendChild(el('div', 'lib-sub', (m.courseName || '') + ' · ' + (m.definition || '') +
@@ -894,15 +1085,56 @@ async function renderLibrary() {
     del.addEventListener('click', async () => {
       if (!confirm('移除《' + (m.lessonName || m.lessonId) + '》的本地缓存？（会归档到回收目录，可恢复）')) return;
       await window.zhibo.library.remove(m.courseId, m.lessonId, false);
+      state.libSel.delete(key);
       toast('已归档到回收目录');
       renderLibrary();
     });
     row.appendChild(del);
     box.appendChild(row);
   });
+
+  paintLibSel();
 }
 
-/* ================= 下载中心 ================= */
+/* 选择状态的统一出口：全选框、计数、按钮可用性 */
+function paintLibSel() {
+  const total = state.libMap.size;
+  const n = state.libSel.size;
+  const info = $('libSelInfo');
+  if (info) info.textContent = n ? ('已选 ' + n + ' 节课' + (total ? ' / 共 ' + total : '')) : '未选择';
+  const all = $('libSelectAll');
+  if (all) {
+    all.checked = total > 0 && n === total;
+    all.indeterminate = n > 0 && n < total;
+    all.disabled = total === 0;
+  }
+  const btn = $('libDelSel');
+  if (btn) {
+    btn.disabled = n === 0;
+    btn.textContent = n ? ('删除选中（' + n + '）') : '删除选中';
+  }
+}
+
+/* 批量删除：逐条走 library.remove（默认归档到回收目录，可恢复） */
+async function deleteSelectedLib() {
+  const keys = [...state.libSel];
+  if (!keys.length) return;
+  if (!confirm('删除选中的 ' + keys.length + ' 节课本地缓存？\n\n会移动到回收目录（数据根 cache/trash），7 天后自动清理，期间可手动还原。')) return;
+  const btn = $('libDelSel');
+  if (btn) { btn.disabled = true; btn.textContent = '删除中…'; }
+  let done = 0, fail = 0;
+  for (const k of keys) {
+    const [cid, lid] = k.split(':');
+    try { await window.zhibo.library.remove(cid, lid, false); done++; }
+    catch (e) { fail++; }
+    if (btn) btn.textContent = '删除中… ' + done + '/' + keys.length;
+  }
+  state.libSel.clear();
+  toast(fail ? ('删除完成：' + done + ' 成功，' + fail + ' 失败') : ('已删除 ' + done + ' 节课的本地缓存'));
+  await renderLibrary();
+}
+
+/* ================= 下载中心 ================= *//* ================= 下载中心 ================= */
 function taskRow(t) {
   const row = el('div', 'dl-row');
   const left = el('div', 'dl-left');
@@ -1741,6 +1973,7 @@ function lineLevel(t) {
 
 /* ================= 视图 ================= */
 function switchView(v) {
+  if (state.view === 'detail' && v !== 'detail') rememberDetailScroll();
   if (v !== 'detail' && v !== state.view) state.prevView = state.view;
   state.view = v;
   ['home', 'courses', 'mine', 'detail', 'library', 'downloads', 'settings', 'logs'].forEach((k) => {
@@ -1751,10 +1984,13 @@ function switchView(v) {
     if (!b.dataset || !b.dataset.view) return;
     b.classList.toggle('active', b.dataset.view === v);
   });
-  $('content').scrollTop = 0;
+  /* 详情页的滚动由 restoreDetailScroll 恢复，别在这里清零；
+   * 它渲染晚于本函数，清零会把刚恢复的位置覆盖掉。 */
+  if (v !== 'detail') $('content').scrollTop = 0;
 
   if (v === 'courses' && !state.allCourses.length) loadAllCourses(1);
   if (v === 'mine' && !state.guest && !state.mineCourses.length) loadMineCourses();
+  if (v === 'detail') restoreDetailScroll(state.currentCourse);
   if (v === 'library') renderLibrary();
   if (v === 'downloads') renderDownloads();
   if (v === 'settings') renderSettings();
@@ -1792,6 +2028,63 @@ function bind() {
     toast('已清理 ' + arr.length + ' 条记录');
     renderDownloads();
   });
+  /* ---------- 搜索框（防抖 220ms，避免每敲一下就发一次请求） ---------- */
+  const debounce = (fn, ms) => {
+    let t = 0;
+    return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms || 220); };
+  };
+  const courseSearch = $('courseSearch');
+  if (courseSearch) {
+    courseSearch.value = state.kwCourse || '';
+    const clearBtn = $('courseSearchClear');
+    const syncClear = () => { if (clearBtn) clearBtn.hidden = !courseSearch.value; };
+    syncClear();
+    courseSearch.addEventListener('input', debounce(() => {
+      state.kwCourse = courseSearch.value;
+      syncClear();
+      loadAllCourses(1);
+    }, 220));
+    if (clearBtn) clearBtn.addEventListener('click', () => {
+      courseSearch.value = ''; state.kwCourse = ''; syncClear(); loadAllCourses(1); courseSearch.focus();
+    });
+  }
+
+  const mineSearch = $('mineSearch');
+  if (mineSearch) {
+    mineSearch.value = state.kwMine || '';
+    mineSearch.addEventListener('input', debounce(() => {
+      state.kwMine = mineSearch.value;
+      loadMineCourses();
+    }, 220));
+  }
+
+  const lessonSearch = $('lessonSearch');
+  if (lessonSearch) {
+    lessonSearch.value = state.kwLesson || '';
+    lessonSearch.addEventListener('input', debounce(() => {
+      state.kwLesson = lessonSearch.value;
+      if (state.currentCourse) renderDetail(state.currentCourse);
+    }, 220));
+  }
+
+  /* ---------- 离线库多选 ---------- */
+  const selAll = $('libSelectAll');
+  if (selAll) selAll.addEventListener('change', () => {
+    if (selAll.checked) {
+      state.libMap.forEach((m, k) => state.libSel.add(String(k)));
+    } else {
+      state.libSel.clear();
+    }
+    document.querySelectorAll('#libList .lib-pick').forEach((cb, i) => {
+      cb.checked = selAll.checked;
+      const row = cb.closest('.lib-row');
+      if (row) row.classList.toggle('picked', selAll.checked);
+    });
+    paintLibSel();
+  });
+  const delSel = $('libDelSel');
+  if (delSel) delSel.addEventListener('click', deleteSelectedLib);
+
   $('logOpenDirBtn').addEventListener('click', () => window.zhibo.log.openDir());
   $('logCopyBtn').addEventListener('click', () => {
     navigator.clipboard.writeText($('logBody').textContent || '').then(() => toast('已复制'), () => toast('复制失败'));
@@ -2076,6 +2369,7 @@ window.__zbUI = {
   openCourse: (c) => openCourse(c),
   switchView: (v) => switchView(v),
   destroyHls: () => destroyHls(),
+  closePlayer: () => closePlayer(),
   state: () => ({
     view: state.view, libCount: state.libMap.size, dlCount: state.dlMap.size,
     seeking: !!state.seeking, hasKp: !!(state.kp && !state.kp.destroyed),
