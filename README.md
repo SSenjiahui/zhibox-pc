@@ -8,12 +8,12 @@
 
 ## 下载
 
-**[最新版本 v1.7.5](https://github.com/SSenjiahui/zhibox-pc/releases/latest)**
+**[最新版本 v1.8.0](https://github.com/SSenjiahui/zhibox-pc/releases/latest)**
 
 | 文件 | 说明 |
 | --- | --- |
-| [ZhiboX-1.7.5-portable-x64.exe](https://github.com/SSenjiahui/zhibox-pc/releases/download/v1.7.5/ZhiboX-1.7.5-portable-x64.exe) | 便携版，免安装，双击即用（数据解包到临时目录，退出后清理） |
-| [ZhiboX-1.7.5-setup-x64.exe](https://github.com/SSenjiahui/zhibox-pc/releases/download/v1.7.5/ZhiboX-1.7.5-setup-x64.exe) | 安装版，可选安装路径，建桌面与开始菜单快捷方式 |
+| [ZhiboX-1.8.0-portable-x64.exe](https://github.com/SSenjiahui/zhibox-pc/releases/download/v1.8.0/ZhiboX-1.8.0-portable-x64.exe) | 便携版，免安装，双击即用（数据解包到临时目录，退出后清理） |
+| [ZhiboX-1.8.0-setup-x64.exe](https://github.com/SSenjiahui/zhibox-pc/releases/download/v1.8.0/ZhiboX-1.8.0-setup-x64.exe) | 安装版，可选安装路径，建桌面与开始菜单快捷方式 |
 
 Windows x64，未做代码签名，首次运行 SmartScreen 可能提示「未知发布者」，选「更多信息 → 仍要运行」即可。
 
