@@ -244,6 +244,9 @@ const biz = {
     return call(q, { cache: true, ttl: 10 * 60 * 1000 });
   },
 
+  subtitles: (lessonId) => call('/course-lesson/zimu/' + encodeURIComponent(lessonId), { cache: true, ttl: 5 * 60 * 1000 }),
+
+
   sign: (lessonId, type) =>
     call('/video/sign?lessonId=' + encodeURIComponent(lessonId) + '&type=' + (type || 2), { cache: false }),
 };

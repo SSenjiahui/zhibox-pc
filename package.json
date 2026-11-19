@@ -1,7 +1,7 @@
 {
   "name": "zhibox-pc",
   "productName": "智博X",
-  "version": "1.7.5",
+  "version": "1.8.0",
   "description": "智博X PC 客户端 · 自带播放内核与离线缓存",
   "main": "src/main.js",
   "author": {

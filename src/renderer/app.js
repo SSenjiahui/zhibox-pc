@@ -1066,6 +1066,7 @@ function doSeek(t) {
     try { v.currentTime = target; } catch (e) {}
   }
   paintSeek(target, dur);
+  paintSubtitle();          /* 暂停态下 seek 不会触发 timeupdate，这里手动刷一次 */
   return via;
 }
 
@@ -1077,6 +1078,147 @@ function destroyHls() {
 function setCover(txt, show) {
   $('playerCoverTxt').textContent = txt || '';
   $('playerCover').hidden = !show;
+}
+
+/* ---------------- 字幕 ---------------- */
+/* 服务端字幕是 WebVTT（/api/course-lesson/zimu/<lessonId>），多数课时没有 url。
+ * VTT 走主进程抓（subtitle:fetch），渲染进程只做解析与时间轴匹配。 */
+
+const subState = { cues: [], on: true, fontSize: 'm', lastIdx: -1 };
+
+/** 解析 WebVTT 文本 → [{ start, end, text }] */
+function parseVtt(txt) {
+  const out = [];
+  if (!txt) return out;
+  const timeRe = /^(\d{1,2}:)?(\d{1,2}):(\d{1,2})[.,](\d{1,3})\s*-->\s*(\d{1,2}:)?(\d{1,2}):(\d{1,2})[.,](\d{1,3})/;
+  const toSec = (h, m, sec, ms) =>
+    (Number(h || 0) * 3600) + (Number(m) * 60) + Number(sec) + Number(ms.padEnd(3, '0')) / 1000;
+  let cur = null, buf = [];
+  const flush = () => {
+    if (cur) {
+      const t = buf.join('\n').replace(/<[^>]+>/g, '').trim();
+      if (t) out.push({ start: cur.start, end: cur.end, text: t });
+    }
+    cur = null; buf = [];
+  };
+  for (const raw of String(txt).split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) { flush(); continue; }
+    const m = line.match(timeRe);
+    if (m) {
+      flush();
+      cur = {
+        start: toSec(m[1] ? m[1].replace(':', '') : 0, m[2], m[3], m[4]),
+        end: toSec(m[5] ? m[5].replace(':', '') : 0, m[6], m[7], m[8]),
+      };
+      continue;
+    }
+    if (/^WEBVTT|^NOTE|^STYLE|^REGION/i.test(line)) continue;
+    if (cur) buf.push(line);
+  }
+  flush();
+  out.sort((a, b) => a.start - b.start);
+  return out;
+}
+
+/** 取当前时间点应显示的字幕（二分 + 线性修正，1567 条也不卡） */
+function cueAt(t) {
+  const arr = subState.cues;
+  if (!arr.length) return null;
+  let lo = 0, hi = arr.length - 1, best = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (arr[mid].start <= t) { best = mid; lo = mid + 1; } else { hi = mid - 1; }
+  }
+  if (best < 0) return null;
+  for (let i = best; i >= 0 && i >= best - 3; i--) {
+    if (t >= arr[i].start && t <= arr[i].end) return arr[i];
+  }
+  return null;
+}
+
+/* 字幕节奏比 timeupdate(≈4Hz) 快：一句话可能只持续 0.3s，
+ * 光靠 timeupdate 会漏掉整句。补一个 20Hz 的轻量时钟，只在播放中跑。 */
+let subRaf = 0;
+function subTick() {
+  if (!state.player || $('playerOverlay').hidden) { subRaf = 0; return; }
+  paintSubtitle();
+  subRaf = requestAnimationFrame(subTick);
+}
+function startSubClock() {
+  if (subRaf) return;
+  subRaf = requestAnimationFrame(subTick);
+}
+function stopSubClock() {
+  if (subRaf) { cancelAnimationFrame(subRaf); subRaf = 0; }
+}
+
+function paintSubtitle() {
+  const layer = $('subLayer');
+  if (!layer) return;
+  if (!subState.on || !subState.cues.length || !state.player) {
+    if (!layer.hidden) layer.hidden = true;
+    subState.lastIdx = -1;
+    return;
+  }
+  const v = V();
+  const cue = cueAt(v.currentTime || 0);
+  if (!cue) { layer.hidden = true; subState.lastIdx = -1; return; }
+  const key = cue.start + ':' + cue.text.length;
+  if (layer.dataset.key === key && !layer.hidden) return;   /* 同一条不重排 */
+  layer.textContent = '';
+  const div = el('div', 'sub-line', cue.text);
+  div.dataset.size = subState.fontSize;
+  layer.appendChild(div);
+  layer.dataset.key = key;
+  layer.hidden = false;
+}
+
+/** 载入某节课的字幕（有就挂，没有就静默隐藏按钮） */
+async function loadSubtitles(lessonId) {
+  subState.cues = [];
+  subState.on = true;
+  subState.lastIdx = -1;
+  $('subLayer').hidden = true;
+  $('subLayer').textContent = '';
+  $('subLayer').dataset.key = '';
+  const btn = $('btnSub');
+  btn.hidden = true;
+  btn.classList.remove('on');
+  try {
+    const r = await unwrap(window.zhibo.course.subtitles(String(lessonId)));
+    const tracks = (r && Array.isArray(r.data)) ? r.data : [];
+    const zh = tracks.find((t) => t && t.url) || null;
+    if (!zh) return;
+    const f = await unwrap(window.zhibo.subtitle(zh.url));
+    const cues = parseVtt(f && f.text);
+    if (!cues.length) return;
+    subState.cues = cues;
+    btn.hidden = false;
+    btn.classList.add('on');
+    logPush([{ level: 'info', scope: 'sub', text: '[sub] 字幕就绪 ' + cues.length + ' 条（' + (zh.language || 'zh') + '）' }]);
+    paintSubtitle();
+  } catch (e) {
+    logPush([{ level: 'warn', scope: 'sub', text: '[sub] 字幕加载失败：' + ((e && e.message) || e) }]);
+  }
+}
+
+function toggleSubtitle() {
+  if (!subState.cues.length) return;
+  subState.on = !subState.on;
+  $('btnSub').classList.toggle('on', subState.on);
+  $('subLayer').dataset.key = '';
+  paintSubtitle();
+  toast(subState.on ? '字幕已开启' : '字幕已关闭');
+}
+
+function cycleSubSize() {
+  const order = ['s', 'm', 'l'];
+  const i = order.indexOf(subState.fontSize);
+  subState.fontSize = order[(i + 1) % order.length];
+  $('subLayer').dataset.key = '';
+  paintSubtitle();
+  toast('字幕字号：' + ({ s: '小', m: '中', l: '大' })[subState.fontSize]);
 }
 
 async function playLesson(lesson, course, opts) {
@@ -1095,6 +1237,8 @@ async function playLesson(lesson, course, opts) {
     lessonName: lesson.name || '', courseName: course.name || '',
     sid: null, mode: null, streams: [], current: 0, duration: 0,
   };
+
+  loadSubtitles(String(lesson.id));   /* 不等它，字幕自己回来自己挂 */
 
   let r;
   try {
@@ -1347,6 +1491,12 @@ async function closePlayer() {
   destroyHls();
   const v = V();
   v.pause(); v.removeAttribute('src'); v.load();
+  subState.cues = [];
+  subState.lastIdx = -1;
+  const sl = $('subLayer');
+  if (sl) { sl.hidden = true; sl.textContent = ''; sl.dataset.key = ''; }
+  const sb = $('btnSub');
+  if (sb) { sb.hidden = true; sb.classList.remove('on'); }
   $('playerOverlay').hidden = true;
   state.player = null;
   if (state.view === 'detail') renderDetail(state.currentCourse);
@@ -1371,6 +1521,7 @@ async function saveProgress(force) {
 function bindPlayer() {
   const v = V();
   v.addEventListener('timeupdate', () => {
+    paintSubtitle();
     const d = v.duration || 0;
     // 拖动中由指针位置决定画面，别被播放进度抢回去
     if (state.seeking) { $('tDur').textContent = fmtTime(d); return; }
@@ -1387,9 +1538,9 @@ function bindPlayer() {
     if (!d || !v.buffered.length) return;
     $('seekBuf').style.width = ((v.buffered.end(v.buffered.length - 1) / d) * 100).toFixed(2) + '%';
   });
-  v.addEventListener('play', () => { $('btnPlay').textContent = '❚❚'; });
-  v.addEventListener('pause', () => { $('btnPlay').textContent = '▶'; saveProgress(false); });
-  v.addEventListener('ended', () => { $('btnPlay').textContent = '▶'; saveProgress(true); });
+  v.addEventListener('play', () => { $('btnPlay').textContent = '❚❚'; startSubClock(); });
+  v.addEventListener('pause', () => { $('btnPlay').textContent = '▶'; saveProgress(false); paintSubtitle(); });
+  v.addEventListener('ended', () => { $('btnPlay').textContent = '▶'; saveProgress(true); stopSubClock(); paintSubtitle(); });
 
   $('btnPlay').addEventListener('click', () => {
     const vv = V();
@@ -1458,6 +1609,9 @@ function bindPlayer() {
     patchSetting({ prefRate: rate });
   });
   $('qSel').addEventListener('change', () => switchQuality(Number($('qSel').value)));
+  $('btnSub').addEventListener('click', (e) => {
+    if (e.shiftKey) cycleSubSize(); else toggleSubtitle();
+  });
   $('btnMute').addEventListener('click', () => {
     const vv = V(); vv.muted = !vv.muted;
     $('btnMute').textContent = vv.muted ? '🔇' : '🔊';

@@ -402,6 +402,7 @@
 
     <div id="playerStage" class="player-stage">
       <video id="videoEl" playsinline></video>
+      <div id="subLayer" class="sub-layer" hidden></div>
       <div id="playerCover" class="player-cover"><div class="spinner"></div><span id="playerCoverTxt">正在解析播放地址…</span></div>
     </div>
 
@@ -418,6 +419,7 @@
         <option value="2">2.0x</option>
       </select>
       <select id="qSel" class="psel" title="清晰度"></select>
+      <button id="btnSub" class="btn-ico" title="字幕" hidden>CC</button>
       <button id="btnMute" class="btn-ico" title="静音">🔊</button>
       <input id="volRange" class="pvrange" type="range" min="0" max="100" step="1" value="100" title="音量" />
       <button id="btnFull" class="btn-ico" title="全屏">⛶</button>

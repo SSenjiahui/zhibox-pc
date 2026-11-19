@@ -40,10 +40,12 @@ contextBridge.exposeInMainWorld('zhibo', {
     full: (id) => call('api:biz', { name: 'courseFull', args: [id] }),
     categories: () => call('api:biz', { name: 'categories' }),
     page: (page, size, cat) => call('api:biz', { name: 'courseList', args: [page, size, cat] }),
+    subtitles: (lessonId) => call('api:biz', { name: 'subtitles', args: [lessonId] }),
   },
 
   /* 图片 */
   image: (url) => call('image:fetch', url),
+  subtitle: (url) => call('subtitle:fetch', url),
 
   /* 播放 */
   play: {
