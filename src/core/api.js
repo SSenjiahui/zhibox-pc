@@ -25,6 +25,15 @@ function isAuthDead(json) {
   return json.code === 0 && AUTH_DEAD_RE.test(String(json.message || ''));
 }
 function noticeAuthDead(pathname) {
+  /* 从没登录过（本机没有任何票据）时，服务端同样会回「未登录」。
+   * 那不是"登录失效"，是"还没登录"——不该弹「登录已过期，请重新登录」，
+   * 新机器第一次打开就顶一条过期提示会让人以为自己账号出问题。 */
+  let had = false;
+  try { const s = require('./store').get('session', null); had = !!(s && (s.authToken || s.userToken)); } catch (e) {}
+  if (!had) {
+    try { log.info('api', '未登录状态请求 ' + pathname + '，跳过「登录失效」提示'); } catch (e) {}
+    return;
+  }
   try { log.warn('api', '登录已失效（' + pathname + '），通知上层重新登录'); } catch (e) {}
   if (onAuthExpired) { try { onAuthExpired(pathname); } catch (e) {} }
 }
